@@ -7,6 +7,10 @@ on:
         description: 'Topic or Week for Fantasy Football news'
         required: true
         default: 'Fantasy Football Waiver Wire Targets and Injury Report'
+      model:
+        description: 'Gemini model to use'
+        required: true
+        default: 'gemini-3.1-pro-preview'
 
   schedule:
     - cron: '0 12 * * 2'
@@ -24,11 +28,12 @@ jobs:
       - name: Fetch and Summarize Fantasy Football News with Gemini
         id: generate_news
         env:
+          MODEL: ${{ github.event.inputs.model || 'gemini-3.1-pro-preview' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TOPIC: ${{ github.event.inputs.topic || 'Fantasy Football Waiver Wire Targets and Injury Report' }}
         run: |
           # 1. Query Gemini API
-          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${GEMINI_API_KEY}" \
+          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
             -X POST \
             -d '{
