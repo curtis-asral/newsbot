@@ -1,0 +1,96 @@
+name: Generate and Send Weekly News Summary
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Topic or theme for the weekly news digest'
+        required: true
+        default: 'U.S. policy and politics'
+      model:
+        description: 'Gemini model to use'
+        required: true
+        default: 'gemini-3.8-flash'
+
+  schedule:
+    - cron: '0 16 * * 5'
+
+jobs:
+  build-and-send:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Pandoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc
+
+      - name: Fetch and Summarize Weekly News with Gemini
+        id: generate_news
+        env:
+          MODEL: ${{ github.event.inputs.model || 'gemini-3.8-flash' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TOPIC: ${{ github.event.inputs.topic || 'U.S. policy and politics' }}
+        run: |
+          # 1. Query Gemini API
+          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d '{
+              "system_instruction": {
+                "parts": [
+                  {
+                    "text": "You are a news curation assistant producing a weekly digest. Prioritize signal over volume — skip anything that wouldn’t change my understanding of a topic or that I could reasonably predict without reading it.\n\n## Coverage priorities (in rough order)\n\n1. Economic policy — tax policy (especially corporate tax changes), minimum wage legislation, healthcare/Medicare policy developments, trade policy and tariffs, labor market and welfare program changes.\n2. Climate and energy — renewable energy policy and deployment, nuclear energy developments, carbon regulation, major climate legislation or litigation.\n3. Policing and criminal justice — police reform legislation, gun regulation developments, criminal justice reform efforts.\n4. Immigration — legal immigration pathway changes, border security policy, major immigration legislation or court rulings.\n5. Foreign policy — U.S.-China relations (trade and strategic competition), foreign aid policy debates, major shifts in a domestic-first foreign policy posture.\n6. Civil rights — reproductive rights, LGBTQ+ rights (including trans healthcare policy), voting rights, human rights developments (domestic and international).\n7. NJ/regional politics — developments involving NJ governor’s race, NJ congressional delegation, and any news involving Sherrill, Gottheimer, Booker, Murphy, or Fulop specifically.\n\n## What to exclude\n\n- Pure horse-race political coverage (polling, campaign gossip) unless it signals a real policy shift.\n- Celebrity/culture-war stories with no substantive policy content.\n- Duplicate coverage of the same event from multiple outlets — pick the best single source.\n- Opinion pieces, unless flagged clearly as opinion and offering a genuinely novel argument.\n\n## Sourcing\n\n- Prioritize original reporting (wire services, primary documents, direct quotes from legislation/rulings) over aggregation or punditry.\n- When a story is contested or has significant coverage differences across the political spectrum, note that briefly rather than picking one framing.\n- Cite the outlet for each item.\n\n## Format\n\nFor each item:\n\n- Headline (plain language, not clickbait-style)\n- 1-3 sentence summary of what actually happened\n- Why it matters (1 sentence, factual — not persuasive framing)\n- Source + link\n\nGroup items under the category headers above. Skip empty categories rather than padding them. Keep the whole digest to roughly 10-15 items unless it’s an unusually heavy news week.\n\n## Tone\n\nNeutral, factual, no editorializing. Don’t soften or hedge policy facts to seem “balanced” — report what happened and what it does, not both-sides framing for factual matters.\n\nOutput only markdown. Do not include a Subject line or title header. Do not include inline citation numbers or brackets like [1.2]."
+                  }
+                ]
+              },
+              "contents": [
+                {
+                  "parts": [
+                    {
+                      "text": "Compile a weekly digest focused on '"${TOPIC}"'. Use the last 7 days of reporting and prioritize original reporting and consequential policy developments. Keep it to roughly 10-15 items unless the week is unusually heavy."
+                    }
+                  ]
+                }
+              ],
+              "tools": [
+                {
+                  "google_search": {}
+                }
+              ],
+              "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 4096
+              }
+            }')
+
+          # 2. Extract ALL text parts safely while skipping non-text parts
+          RAW_MARKDOWN=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[]? | select(.text != null) | .text')
+
+          if [ -z "$RAW_MARKDOWN" ] || [ "$RAW_MARKDOWN" == "null" ]; then
+            echo "::error::Failed to generate email content. Raw API response was: $RESPONSE"
+            exit 1
+          fi
+
+          # 3. Save raw markdown to a file
+          echo "$RAW_MARKDOWN" > raw_briefing.md
+
+          # 4. Convert Markdown to HTML with Pandoc
+          pandoc raw_briefing.md -f markdown -t html -o email_body.html
+
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+
+          subject: "📰 Weekly Policy & Politics Briefing"
+          to: ${{ vars.EMAIL }}
+          from: "News Briefing <${{ secrets.MAIL_USERNAME }}>"
+
+          # Uses the exact parameter key required for HTML files
+          html_body: file://email_body.html
