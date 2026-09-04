@@ -16,8 +16,13 @@ on:
 jobs:
   build-and-send:
     runs-on: ubuntu-latest
-    
+
     steps:
+      - name: Install Pandoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc
+
       - name: Fetch and Summarize Fantasy Football News with Gemini
         id: generate_news
         env:
@@ -25,15 +30,14 @@ jobs:
           TOPIC: ${{ github.event.inputs.topic || 'Fantasy Football Waiver Wire Targets and Injury Report' }}
         run: |
           # 1. Query Gemini API with Google Search Grounding enabled
-            # RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GOOGLE_API_KEY}" \
-            RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${GEMINI_API_KEY}" \
+          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
             -X POST \
             -d '{
               "system_instruction": {
                 "parts": [
                   {
-                    "text": "You are an elite fantasy football analyst and newsletter writer. Write a clean, highly actionable email briefing tailored for fantasy managers making Tuesday waiver decisions. Organize the response into standard markdown with clear section headers: 1. Top Waiver Wire Targets (grouped by RB, WR, QB, TE with FAAB % or priority estimates), 2. Major Injury & Snap Share Updates, 3. Streaming Options (QB/TE/DST), and 4. Players to Drop."
+                    "text": "You are an elite fantasy football analyst. Write a clean, highly actionable email briefing tailored for fantasy managers making Tuesday waiver decisions. DO NOT include a Subject line or title header. Jump straight into the content using Markdown section headers: 1. Top Waiver Wire Targets, 2. Major Injury Updates, 3. Streamers, and 4. Drops."
                   }
                 ]
               },
@@ -41,7 +45,7 @@ jobs:
                 {
                   "parts": [
                     {
-                      "text": "Gather the latest NFL player updates, injury reports, and waiver wire recommendations for '"${TOPIC}"'. Synthesize the findings into a Fantasy Football Tuesday Briefing."
+                      "text": "Gather latest NFL updates and waiver wire recommendations for '"${TOPIC}"'."
                     }
                   ]
                 }
@@ -53,31 +57,31 @@ jobs:
               ],
               "generationConfig": {
                 "temperature": 0.3,
-                "maxOutputTokens": 2048
+                "maxOutputTokens": 4096
               }
             }')
 
-          # 2. Extract text from the response JSON using jq
-          EMAIL_BODY=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
+          # 2. Concatenate all text parts returned by Gemini
+          RAW_MARKDOWN=$(echo "$RESPONSE" | jq -r '[.candidates[0].content.parts[].text] | join("")')
 
-          # Check if the output was successfully generated
-          if [ -z "$EMAIL_BODY" ]; then
+          if [ -z "$RAW_MARKDOWN" ] || [ "$RAW_MARKDOWN" == "null" ]; then
             echo "::error::Failed to generate email content. Response was: $RESPONSE"
             exit 1
           fi
 
-          # 3. Write to a local file (avoids multiline bash escaping issues)
-          echo "$EMAIL_BODY" > news_briefing.txt
+          # 3. Save to file and convert Markdown to HTML via Pandoc
+          echo "$RAW_MARKDOWN" > raw_briefing.md
+          pandoc raw_briefing.md -f markdown -t html -o email_body.html
 
       - name: Send Email
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v4
         with:
           # SMTP Server Configuration
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
-          
-          # Authentication Secrets
+
+          # Authentication Secrets (Must use a 16-character Google App Password)
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
 
@@ -85,6 +89,6 @@ jobs:
           subject: "🏈 Fantasy Football Tuesday Waiver & News Briefing"
           to: ${{ vars.EMAIL }}
           from: "Football God <${{ secrets.MAIL_USERNAME }}>"
-          
-          # Reads the generated content directly from file
-          body: file://news_briefing.txt
+
+          # Points to the HTML converted file
+          html_body: file://email_body.html
