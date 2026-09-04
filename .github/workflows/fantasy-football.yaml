@@ -25,6 +25,7 @@ jobs:
           TOPIC: ${{ github.event.inputs.topic || 'Fantasy Football Waiver Wire Targets and Injury Report' }}
         run: |
           # 1. Query Gemini API with Google Search Grounding enabled
+            # RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GOOGLE_API_KEY}" \
             RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
             -X POST \

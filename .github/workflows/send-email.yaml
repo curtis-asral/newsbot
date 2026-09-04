@@ -1,0 +1,30 @@
+name: Generate and Send Fantasy Football Briefing
+
+on:
+  # Allows triggering the workflow manually from the Actions tab with a custom week or topic
+  workflow_dispatch:
+
+jobs:
+  build-and-send:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+            # SMTP Server Configuration
+            server_address: smtp.gmail.com
+            server_port: 465
+            secure: true
+            
+            # Authentication Secrets
+            username: ${{ secrets.MAIL_USERNAME }}
+            password: ${{ secrets.MAIL_PASSWORD }}
+
+            # Email Details
+            subject: "🏈 Fantasy Football Tuesday Waiver & News Briefing"
+            to: ${{ vars.EMAIL }}
+            from: "Football God <${{ secrets.MAIL_USERNAME }}>"
+            
+            # Reads the generated content directly from file
+            body: file://news_briefing.txt
