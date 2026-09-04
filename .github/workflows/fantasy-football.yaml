@@ -1,7 +1,6 @@
 name: Generate and Send Fantasy Football Briefing
 
 on:
-  # Allows triggering the workflow manually from the Actions tab with a custom week or topic
   workflow_dispatch:
     inputs:
       topic:
@@ -9,7 +8,6 @@ on:
         required: true
         default: 'Fantasy Football Waiver Wire Targets and Injury Report'
 
-  # Runs every Tuesday at 8:00 AM EDT / 7:00 AM EST (UTC 12:00)
   schedule:
     - cron: '0 12 * * 2'
 
@@ -29,7 +27,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TOPIC: ${{ github.event.inputs.topic || 'Fantasy Football Waiver Wire Targets and Injury Report' }}
         run: |
-          # 1. Query Gemini API with Google Search Grounding enabled
+          # 1. Query Gemini API
           RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
             -X POST \
@@ -37,7 +35,7 @@ jobs:
               "system_instruction": {
                 "parts": [
                   {
-                    "text": "You are an elite fantasy football analyst. Write a clean, highly actionable email briefing tailored for fantasy managers making Tuesday waiver decisions. DO NOT include a Subject line or title header. Jump straight into the content using Markdown section headers: 1. Top Waiver Wire Targets, 2. Major Injury Updates, 3. Streamers, and 4. Drops."
+                    "text": "You are an elite fantasy football analyst. Write a clean, highly actionable email briefing tailored for fantasy managers making Tuesday waiver decisions. DO NOT include inline search citation numbers or brackets like [1.2] or [1.3.3] in the text. DO NOT include a Subject line or title header. Jump straight into the content using Markdown section headers: 1. Top Waiver Wire Targets, 2. Major Injury Updates, 3. Streamers, and 4. Drops."
                   }
                 ]
               },
@@ -61,34 +59,33 @@ jobs:
               }
             }')
 
-          # 2. Concatenate all text parts returned by Gemini
-          RAW_MARKDOWN=$(echo "$RESPONSE" | jq -r '[.candidates[0].content.parts[].text] | join("")')
+          # 2. Extract ALL text parts safely while skipping non-text parts
+          RAW_MARKDOWN=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[]? | select(.text != null) | .text')
 
           if [ -z "$RAW_MARKDOWN" ] || [ "$RAW_MARKDOWN" == "null" ]; then
-            echo "::error::Failed to generate email content. Response was: $RESPONSE"
+            echo "::error::Failed to generate email content. Raw API response was: $RESPONSE"
             exit 1
           fi
 
-          # 3. Save to file and convert Markdown to HTML via Pandoc
+          # 3. Save raw markdown to a file
           echo "$RAW_MARKDOWN" > raw_briefing.md
+
+          # 4. Convert Markdown to HTML with Pandoc
           pandoc raw_briefing.md -f markdown -t html -o email_body.html
 
       - name: Send Email
         uses: dawidd6/action-send-mail@v4
         with:
-          # SMTP Server Configuration
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
 
-          # Authentication Secrets (Must use a 16-character Google App Password)
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
 
-          # Email Details
           subject: "🏈 Fantasy Football Tuesday Waiver & News Briefing"
           to: ${{ vars.EMAIL }}
           from: "Football God <${{ secrets.MAIL_USERNAME }}>"
 
-          # Points to the HTML converted file
+          # Uses the exact parameter key required for HTML files
           html_body: file://email_body.html
