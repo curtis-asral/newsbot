@@ -1,0 +1,89 @@
+name: Generate and Send Fantasy Football Briefing
+
+on:
+  # Allows triggering the workflow manually from the Actions tab with a custom week or topic
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Topic or Week for Fantasy Football news'
+        required: true
+        default: 'Fantasy Football Waiver Wire Targets and Injury Report'
+
+  # Runs every Tuesday at 8:00 AM EDT / 7:00 AM EST (UTC 12:00)
+  schedule:
+    - cron: '0 12 * * 2'
+
+jobs:
+  build-and-send:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Fetch and Summarize Fantasy Football News with Gemini
+        id: generate_news
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          TOPIC: ${{ github.event.inputs.topic || 'Fantasy Football Waiver Wire Targets and Injury Report' }}
+        run: |
+          # 1. Query Gemini API with Google Search Grounding enabled
+          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GOOGLE_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            -d '{
+              "system_instruction": {
+                "parts": [
+                  {
+                    "text": "You are an elite fantasy football analyst and newsletter writer. Write a clean, highly actionable email briefing tailored for fantasy managers making Tuesday waiver decisions. Organize the response into standard markdown with clear section headers: 1. Top Waiver Wire Targets (grouped by RB, WR, QB, TE with FAAB % or priority estimates), 2. Major Injury & Snap Share Updates, 3. Streaming Options (QB/TE/DST), and 4. Players to Drop."
+                  }
+                ]
+              },
+              "contents": [
+                {
+                  "parts": [
+                    {
+                      "text": "Gather the latest NFL player updates, injury reports, and waiver wire recommendations for '"${TOPIC}"'. Synthesize the findings into a Fantasy Football Tuesday Briefing."
+                    }
+                  ]
+                }
+              ],
+              "tools": [
+                {
+                  "google_search": {}
+                }
+              ],
+              "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 2048
+              }
+            }')
+
+          # 2. Extract text from the response JSON using jq
+          EMAIL_BODY=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
+
+          # Check if the output was successfully generated
+          if [ -z "$EMAIL_BODY" ]; then
+            echo "::error::Failed to generate email content. Response was: $RESPONSE"
+            exit 1
+          fi
+
+          # 3. Write to a local file (avoids multiline bash escaping issues)
+          echo "$EMAIL_BODY" > news_briefing.txt
+
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          # SMTP Server Configuration
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          
+          # Authentication Secrets
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+
+          # Email Details
+          subject: "🏈 Fantasy Football Tuesday Waiver & News Briefing"
+          to: ${{ vars.EMAIL }}
+          from: "Football God <${{ secrets.MAIL_USERNAME }}>"
+          
+          # Reads the generated content directly from file
+          body: file://news_briefing.txt
