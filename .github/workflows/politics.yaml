@@ -64,8 +64,13 @@ jobs:
               }
             }')
 
-          # 2. Extract ALL text parts safely while skipping non-text parts
-          RAW_MARKDOWN=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[]? | select(.text != null) | .text')
+          # 2. Extract ALL text parts safely while skipping non-text parts and preserving the full response
+          RAW_MARKDOWN=$(echo "$RESPONSE" | jq -r '
+            .candidates[0].content.parts
+            | map(select(.text != null) | .text)
+            | join("\n\n")
+            // empty
+          ')
 
           if [ -z "$RAW_MARKDOWN" ] || [ "$RAW_MARKDOWN" == "null" ]; then
             echo "::error::Failed to generate email content. Raw API response was: $RESPONSE"
