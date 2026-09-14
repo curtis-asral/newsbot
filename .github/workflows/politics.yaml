@@ -60,20 +60,23 @@ jobs:
               ],
               "generationConfig": {
                 "temperature": 0.3,
-                "maxOutputTokens": 4096
+                "maxOutputTokens": 8192
               }
             }')
 
-          # 2. Extract ALL text parts safely while skipping non-text parts and preserving the full response
-          RAW_MARKDOWN=$(echo "$RESPONSE" | jq -r '
+          # 2. Extract ALL text parts safely - write response to file first for large content
+          echo "$RESPONSE" > api_response.json
+          
+          RAW_MARKDOWN=$(jq -r '
             .candidates[0].content.parts
             | map(select(.text != null) | .text)
             | join("\n\n")
             // empty
-          ')
+          ' api_response.json)
 
           if [ -z "$RAW_MARKDOWN" ] || [ "$RAW_MARKDOWN" == "null" ]; then
-            echo "::error::Failed to generate email content. Raw API response was: $RESPONSE"
+            echo "::error::Failed to generate email content. API response:"
+            cat api_response.json | jq '.' | head -100
             exit 1
           fi
 
